@@ -8,11 +8,12 @@
 ![Express](https://img.shields.io/badge/Express-4.21.2-000000?style=flat-square&logo=express&logoColor=white)
 ![Gemini AI](https://img.shields.io/badge/Google_Gemini-AI-4285F4?style=flat-square&logo=google&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.1.14-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Security](https://img.shields.io/badge/Security-Verified-4CAF50?style=flat-square&logo=security&logoColor=white)
 
 **Transform family photos into personalized, AI-illustrated children's storybooks.**  
 Upload a photo, enter some names, and watch as a 10-page adventure comes to life — starring your loved ones.
 
-[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [🛠️ Tech Stack](#%EF%B8%8F-tech-stack) • [⚙️ Configuration](#%EF%B8%8F-configuration) • [🤝 Contributing](#-contributing)
+[✨ Features](#-features) • [🚀 Quick Start](#-quick-start) • [🛡️ Security](#-security) • [🛠️ Tech Stack](#%EF%B8%8F-tech-stack) • [⚙️ Configuration](#%EF%B8%8F-configuration) • [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -26,9 +27,30 @@ Upload a photo, enter some names, and watch as a 10-page adventure comes to life
 | 🖼️ **Photo-Based Illustrations** | Upload photos so the AI generates artwork that reflects the real people |
 | 📖 **10-Page Story Arc** | Full narrative structure with a beginning, middle, and end — not just a one-pager |
 | 🎨 **Children's Book Art Style** | Illustrations rendered in a warm, whimsical style suitable for all ages |
-| 💳 **Preview & Unlock Flow** | Free preview of the first 3 pages; unlock the complete story via integrated payments |
+| 💳 **Secure Payment Flow** | Preview first 3 pages; unlock complete story via verified Razorpay payments |
 | 📱 **Fully Responsive** | Smooth experience on phones, tablets, and desktops |
-| 🔒 **Secure API Handling** | All API keys stay server-side via environment variables — never exposed to the client |
+| 🛡️ **Enterprise Security** | Rate limiting, input validation, and secure API key management |
+| ⚡ **Real-time Generation** | Fast AI-powered story and image creation |
+
+---
+
+## 🛡️ Security & Trust
+
+**StoryPals takes security seriously:**
+
+- 🔐 **Payment Verification** - All transactions verified with cryptographic signatures
+- 🚦 **Rate Limiting** - 10 requests per 15 minutes prevents abuse and cost overrun
+- ✅ **Input Validation** - Photo uploads validated for size (5MB), type, and format
+- 🔑 **API Key Protection** - Keys never exposed to client-side code
+- 🧹 **Data Sanitization** - All user inputs validated and sanitized
+
+**Recent Security Updates (v1.1.0):**
+- Fixed payment verification bypass vulnerability
+- Corrected AI model references for reliable generation
+- Added comprehensive rate limiting
+- Enhanced photo upload validation
+
+---
 
 ---
 
@@ -182,15 +204,17 @@ The story generation prompt lives in `server.ts` inside the `generateStoryText` 
 
 ## 🔌 API Reference
 
-The Express backend exposes these endpoints:
+The Express backend exposes these secure endpoints:
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Server health check |
-| `POST` | `/api/story-text` | Generate story narrative (text only) |
-| `POST` | `/api/story-images` | Generate story illustrations |
-| `POST` | `/api/create-order` | Create a Razorpay payment order |
-| `POST` | `/api/verify-payment` | Verify and confirm payment completion |
+| Method | Endpoint | Description | Security |
+|---|---|---|---|
+| `GET` | `/api/health` | Server health check | None |
+| `POST` | `/api/story-text` | Generate story narrative | Rate limited (10/15min) |
+| `POST` | `/api/story-images` | Generate story illustrations | Rate limited (10/15min) |
+| `POST` | `/api/create-order` | Create Razorpay payment order | Requires Razorpay keys |
+| `POST` | `/api/verify-payment` | Verify payment with signature | Cryptographic verification |
+
+**Rate Limiting:** All generation endpoints are protected with a 10-requests-per-15-minute limit per IP address to prevent abuse.
 
 ---
 
@@ -245,22 +269,46 @@ Please keep PRs focused — one feature or fix per pull request makes review muc
 ## 🐛 Troubleshooting
 
 **The server starts but story generation fails**  
-→ Check that `GEMINI_API_KEY` is set correctly in `.env` and that your key has the Gemini API enabled in Google AI Studio.
+→ Check that `GEMINI_API_KEY` is set correctly in `.env` and that your key has access to the Gemini 1.5 Pro model in Google AI Studio.
 
 **Images aren't generating**  
-→ Image generation requires the `gemini-pro-vision` model. Confirm your API key has access to vision/multimodal endpoints.
+→ Image generation uses the `gemini-2.5-flash-image` model. Ensure your API key has multimodal/vision capabilities enabled.
 
-**Payment flow not working**  
-→ The payment feature is optional. If `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are not set, the unlock flow will be skipped.
+**Payment verification fails**  
+→ The payment system now uses cryptographic signature verification. Ensure `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are correctly set in `.env`.
+
+**Getting "Too many requests" error**  
+→ The API includes rate limiting (10 requests per 15 minutes). Wait a bit before trying again, or contact support for higher limits.
+
+**Photo uploads are rejected**  
+→ Photos must be valid base64-encoded images under 5MB in JPEG, PNG, or WebP format. Check the browser console for validation details.
 
 **Port 3000 already in use**  
-→ Change the port in `vite.config.ts` (for the frontend) and update `APP_URL` in `.env` accordingly.
+→ Kill existing processes on port 3000, or change the port in your environment configuration.
 
 For other issues, open a [GitHub Issue](https://github.com/Kaushalo5/StoryPals/issues) with your Node.js version and the full error message.
 
 ---
 
-## 📝 License
+## � Changelog
+
+### v1.1.0 - Security & Stability Update (2026-04-10)
+- 🔒 **CRITICAL:** Fixed payment verification bypass - now uses proper cryptographic signature validation
+- 🤖 **FIXED:** Corrected AI model names from non-existent `"gemini-3.1-pro-preview"` to working `"gemini-1.5-pro"`
+- 🛡️ **ADDED:** Rate limiting (10 requests/15min) on all generation endpoints
+- ✅ **ADDED:** Comprehensive input validation for photo uploads (size, type, format)
+- 🔐 **ENHANCED:** Improved error handling and security logging
+
+### v1.0.0 - Initial Release (2026-04-XX)
+- ✨ Complete AI-powered storybook generation system
+- 🎨 Photo-based character illustrations
+- 💳 Integrated payment flow with preview/unlock
+- 📱 Fully responsive React frontend
+- 🚀 Production-ready Express backend
+
+---
+
+## �📝 License
 
 MIT License — see the [LICENSE](LICENSE) file for details. Free to use, modify, and distribute.
 
