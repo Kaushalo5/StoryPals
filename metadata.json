@@ -1,0 +1,5 @@
+{
+  "name": "StoryPals",
+  "description": "Create personalized family storybooks with AI-transformed character avatars from your photos.",
+  "requestFramePermissions": ["camera"]
+}
