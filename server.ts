@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import crypto from "crypto";
 import Razorpay from "razorpay";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -12,6 +13,28 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Simple in-memory rate limiting
+const rateLimit = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX_REQUESTS = 10; // 10 requests per window
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const userLimit = rateLimit.get(ip);
+
+  if (!userLimit || now > userLimit.resetTime) {
+    rateLimit.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return true;
+  }
+
+  if (userLimit.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+
+  userLimit.count++;
+  return true;
+}
 
 interface StoryData {
   title: string;
@@ -28,7 +51,64 @@ interface StoryImagesRequest {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function validateChildInfo(info: Partial<ChildInfo> | undefined): info is ChildInfo {
-  return Boolean(info?.name && info?.gender && info?.category);
+  if (!info?.name || !info?.gender || !info?.category) {
+    return false;
+  }
+
+  // Validate name length
+  if (info.name.length < 1 || info.name.length > 50) {
+    return false;
+  }
+
+  // Validate adult name if provided
+  if (info.adultName && (info.adultName.length < 1 || info.adultName.length > 50)) {
+    return false;
+  }
+
+  // Validate photo data if provided
+  if (info.childPhoto && !isValidBase64Image(info.childPhoto)) {
+    return false;
+  }
+
+  if (info.adultPhoto && !isValidBase64Image(info.adultPhoto)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isValidBase64Image(data: string): boolean {
+  // Check if it's a valid base64 data URL for images
+  const maxSize = 5 * 1024 * 1024; // 5MB limit
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+  try {
+    if (!data.startsWith('data:image/')) {
+      return false;
+    }
+
+    const [header, base64Data] = data.split(',');
+    if (!header || !base64Data) {
+      return false;
+    }
+
+    // Check MIME type
+    const mimeType = header.split(':')[1]?.split(';')[0];
+    if (!allowedTypes.includes(mimeType)) {
+      return false;
+    }
+
+    // Check file size (rough estimate)
+    const sizeInBytes = (base64Data.length * 3) / 4;
+    if (sizeInBytes > maxSize) {
+      return false;
+    }
+
+    // Validate base64 format
+    return /^[A-Za-z0-9+/]*={0,2}$/.test(base64Data);
+  } catch {
+    return false;
+  }
 }
 
 async function generateImageWithRetry(
@@ -110,7 +190,7 @@ async function describeCharactersFromPhotos(
     return "a child and their family member";
   }
 
-  const model = "gemini-3.1-pro-preview";
+  const model = "gemini-1.5-pro";
   const parts: any[] = [
     {
       text: "Describe the people in these photos for a children's storybook. Focus on their appearance, relationship, and any unique features. Keep it short and whimsical.",
@@ -144,7 +224,7 @@ async function describeCharactersFromPhotos(
 }
 
 async function generateStoryText(info: ChildInfo): Promise<StoryData> {
-  const model = "gemini-3.1-pro-preview";
+  const model = "gemini-1.5-pro";
 
   let characterContext = info.description || "";
   if (!characterContext || info.category === "surprise") {
@@ -262,6 +342,14 @@ async function startServer() {
   });
 
   app.post("/api/story-text", async (req, res) => {
+    const clientIP = req.ip || req.connection.remoteAddress || "unknown";
+
+    if (!checkRateLimit(clientIP)) {
+      return res.status(429).json({
+        error: "Too many requests. Please try again later."
+      });
+    }
+
     const info = req.body?.info as Partial<ChildInfo> | undefined;
     if (!validateChildInfo(info)) {
       return res.status(400).json({ error: "Missing required child info" });
@@ -277,6 +365,14 @@ async function startServer() {
   });
 
   app.post("/api/story-images", async (req, res) => {
+    const clientIP = req.ip || req.connection.remoteAddress || "unknown";
+
+    if (!checkRateLimit(clientIP)) {
+      return res.status(429).json({
+        error: "Too many requests. Please try again later."
+      });
+    }
+
     const body = req.body as Partial<StoryImagesRequest> | undefined;
 
     if (
@@ -329,8 +425,42 @@ async function startServer() {
     }
   });
 
-  app.post("/api/verify-payment", async (_req, res) => {
-    res.json({ status: "ok" });
+  app.post("/api/verify-payment", async (req, res) => {
+    const r = getRazorpay();
+    if (!r) {
+      return res.status(500).json({ error: "Razorpay is not configured" });
+    }
+
+    try {
+      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+
+      if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        return res.status(400).json({ error: "Missing payment verification data" });
+      }
+
+      // Verify payment signature
+      const sign = razorpay_order_id + "|" + razorpay_payment_id;
+      const expectedSign = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
+        .update(sign.toString())
+        .digest("hex");
+
+      if (razorpay_signature === expectedSign) {
+        res.json({
+          status: "success",
+          message: "Payment verified successfully",
+          paymentId: razorpay_payment_id
+        });
+      } else {
+        res.status(400).json({
+          status: "failed",
+          message: "Payment verification failed"
+        });
+      }
+    } catch (error: any) {
+      console.error("Payment verification error:", error);
+      res.status(500).json({ error: error.message });
+    }
   });
 
   if (process.env.NODE_ENV !== "production") {
